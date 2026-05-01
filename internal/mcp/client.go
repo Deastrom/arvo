@@ -189,11 +189,9 @@ func (c *Client) doOnce(body []byte, reqID any) (*Response, error) {
 
 // parseSSE reads a Server-Sent Events stream and returns the JSON-RPC response
 // whose ID matches requestID. Server-initiated notifications are skipped.
+// Uses bufio.Reader.ReadString instead of bufio.Scanner to avoid per-line size limits.
 func parseSSE(r io.Reader, requestID any) (*Response, error) {
-	scanner := bufio.NewScanner(r)
-	// Default 64KB buffer is too small for large MCP responses (e.g. Jira issues
-	// with many comments). Set a 10MB max token size.
-	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
+	reader := bufio.NewReaderSize(r, 64*1024)
 	var (
 		eventType string
 		dataLines []string
@@ -235,28 +233,27 @@ func parseSSE(r io.Reader, requestID any) (*Response, error) {
 		return &rpcResp, nil
 	}
 
-	for scanner.Scan() {
-		line := scanner.Text()
+	for {
+		line, err := reader.ReadString('\n')
+		// Trim the trailing newline(s).
+		line = strings.TrimRight(line, "\r\n")
 
-		// Blank line = dispatch the event.
 		if line == "" {
-			resp, err := flush()
-			eventType = ""
-			dataLines = nil
-			if err != nil {
-				return nil, err
+			// Blank line = dispatch the event.
+			if err == nil || err == io.EOF {
+				resp, ferr := flush()
+				eventType = ""
+				dataLines = nil
+				if ferr != nil {
+					return nil, ferr
+				}
+				if resp != nil {
+					return resp, nil
+				}
 			}
-			if resp != nil {
-				return resp, nil
-			}
-			continue
-		}
-
-		if strings.HasPrefix(line, "event:") {
-			// TrimSpace is correct for the event field (no data payload concern).
+		} else if strings.HasPrefix(line, "event:") {
 			eventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
 		} else if strings.HasPrefix(line, "data:") {
-			// Per SSE spec §9.2.6: strip exactly one leading space if present.
 			d := strings.TrimPrefix(line, "data:")
 			if strings.HasPrefix(d, " ") {
 				d = d[1:]
@@ -264,6 +261,13 @@ func parseSSE(r io.Reader, requestID any) (*Response, error) {
 			dataLines = append(dataLines, d)
 		}
 		// id: and retry: fields are intentionally ignored.
+
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("sse read: %w", err)
+		}
 	}
 
 	// Flush any trailing event without a trailing blank line.
@@ -275,9 +279,6 @@ func parseSSE(r io.Reader, requestID any) (*Response, error) {
 		return resp, nil
 	}
 
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("sse read: %w", err)
-	}
 	return nil, fmt.Errorf("no matching JSON-RPC response found in SSE stream")
 }
 
