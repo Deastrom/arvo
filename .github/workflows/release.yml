@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: [test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('go.sum') }}
+          restore-keys: ${{ runner.os }}-go-
+
+      - uses: jdx/mise-action@v2
+
+      - name: Determine next version
+        id: version
+        run: |
+          NEXT="v$(convco version --bump)"
+          LAST="$(git describe --tags --abbrev=0 2>/dev/null || echo '')"
+          echo "next=${NEXT}" >> "$GITHUB_OUTPUT"
+          echo "last=${LAST}" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if no releasable commits
+        id: check
+        run: |
+          if [ "${{ steps.version.outputs.next }}" = "${{ steps.version.outputs.last }}" ]; then
+            echo "No version bump — skipping release."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate changelog
+        if: steps.check.outputs.skip == 'false'
+        run: convco changelog --unreleased > RELEASE_NOTES.md
+
+      - name: Build release binaries
+        if: steps.check.outputs.skip == 'false'
+        run: mise run release
+
+      - name: Create GitHub release
+        if: steps.check.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.next }}" \
+            --title "${{ steps.version.outputs.next }}" \
+            --notes-file RELEASE_NOTES.md \
+            dist/*
