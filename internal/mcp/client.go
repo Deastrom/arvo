@@ -191,6 +191,9 @@ func (c *Client) doOnce(body []byte, reqID any) (*Response, error) {
 // whose ID matches requestID. Server-initiated notifications are skipped.
 func parseSSE(r io.Reader, requestID any) (*Response, error) {
 	scanner := bufio.NewScanner(r)
+	// Default 64KB buffer is too small for large MCP responses (e.g. Jira issues
+	// with many comments). Set a 10MB max token size.
+	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
 	var (
 		eventType string
 		dataLines []string
