@@ -1,0 +1,70 @@
+[tools]
+"github:convco/convco" = "0.6.3"
+go = "1.26.2"
+
+[vars]
+bin    = "arvo"
+module = "github.com/Deastrom/arvo"
+
+[tasks.build]
+description = "Build arvo binary for the current platform"
+sources     = ["**/*.go", "go.mod", "go.sum"]
+outputs     = ["arvo"]
+run         = 'go build -ldflags "-X main.version=$(convco version 2>/dev/null || echo dev)" -o {{vars.bin}} .'
+
+[tasks."test:unit"]
+description = "Run unit tests"
+run         = "go test ./..."
+
+[tasks."test:contract"]
+description = "Run MCP protocol contract tests (no live credentials needed)"
+run         = "go test -v -tags contract ./contract/..."
+
+[tasks.test]
+description = "Run all non-contract tests"
+depends     = ["test:unit"]
+run         = "echo 'Tests passed'"
+
+[tasks.lint]
+description = "Run go vet"
+run         = "go vet ./..."
+
+[tasks.changelog]
+description = "Preview changelog since last tag"
+run         = "convco changelog"
+
+[tasks."release:linux-amd64"]
+description = "Cross-compile for linux/amd64"
+env         = { GOOS = "linux", GOARCH = "amd64", CGO_ENABLED = "0" }
+run         = 'go build -ldflags "-X main.version=$(convco version 2>/dev/null || echo dev)" -o dist/{{vars.bin}}-linux-amd64 .'
+
+[tasks."release:linux-arm64"]
+description = "Cross-compile for linux/arm64"
+env         = { GOOS = "linux", GOARCH = "arm64", CGO_ENABLED = "0" }
+run         = 'go build -ldflags "-X main.version=$(convco version 2>/dev/null || echo dev)" -o dist/{{vars.bin}}-linux-arm64 .'
+
+[tasks."release:darwin-amd64"]
+description = "Cross-compile for darwin/amd64"
+env         = { GOOS = "darwin", GOARCH = "amd64", CGO_ENABLED = "0" }
+run         = 'go build -ldflags "-X main.version=$(convco version 2>/dev/null || echo dev)" -o dist/{{vars.bin}}-darwin-amd64 .'
+
+[tasks."release:darwin-arm64"]
+description = "Cross-compile for darwin/arm64"
+env         = { GOOS = "darwin", GOARCH = "arm64", CGO_ENABLED = "0" }
+run         = 'go build -ldflags "-X main.version=$(convco version 2>/dev/null || echo dev)" -o dist/{{vars.bin}}-darwin-arm64 .'
+
+[tasks."release:windows-amd64"]
+description = "Cross-compile for windows/amd64"
+env         = { GOOS = "windows", GOARCH = "amd64", CGO_ENABLED = "0" }
+run         = 'go build -ldflags "-X main.version=$(convco version 2>/dev/null || echo dev)" -o dist/{{vars.bin}}-windows-amd64.exe .'
+
+[tasks.release]
+description = "Cross-compile for all platforms (output: dist/)"
+depends     = [
+  "release:linux-amd64",
+  "release:linux-arm64",
+  "release:darwin-amd64",
+  "release:darwin-arm64",
+  "release:windows-amd64",
+]
+run         = "echo 'Release builds written to dist/'"
