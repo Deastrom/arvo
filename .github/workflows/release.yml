@@ -49,7 +49,7 @@ jobs:
 
       - name: Generate changelog
         if: steps.check.outputs.skip == 'false'
-        run: convco changelog --unreleased > RELEASE_NOTES.md
+        run: convco changelog --unreleased "${{ steps.version.outputs.next }}" > RELEASE_NOTES.md
 
       - name: Build release binaries
         if: steps.check.outputs.skip == 'false'
