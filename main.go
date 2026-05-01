@@ -10,5 +10,6 @@ var version = "dev"
 
 func main() {
 	mcp.Version = version
+	cmd.SetVersion(version)
 	cmd.Execute()
 }
