@@ -1,162 +1,191 @@
-# arvo
-
-CLI tool that bridges AI coding agents to Atlassian (Jira + Confluence) via the Atlassian MCP, without requiring the MCP to be loaded into agent context.
+# arvo — Slim Output Plan
 
 ## Problem
 
-The Atlassian MCP works well but consumes significant context window when loaded. AI agents already interact effectively with CLI tools (like `glab` for GitLab) via bash. `arvo` acts as a CLI for agents (and humans) that proxies to the Atlassian MCP under the hood.
+MCP responses from Atlassian are enormous. A single `arvo jira get EA-123` can
+return hundreds of KB of nested JSON — full issue schema, all fields, complete
+comment history with author metadata, renderedBody, schema noise, etc.
 
-## Architecture
+The primary consumer is an AI agent. Every byte of output costs context window.
+The current default (MCP text content as-is) is unusable at scale.
 
-```
-Agent (Claude Code / OpenCode)
-  │ bash
-  ▼
-arvo (Go binary)
-  │ HTTP/SSE + OAuth 2.1
-  ▼
-mcp.atlassian.com/v1/mcp
-```
+## Goal
 
-## OAuth Flow
+Aggressive default truncation. The agent sees only what it needs to decide what
+to do next. Full data available on demand via flags.
 
-Atlassian's MCP exposes standard OAuth 2.1 discovery:
+## Prior Art
 
-- **AS Metadata**: `https://mcp.atlassian.com/.well-known/oauth-authorization-server`
-- **Authorization**: `https://mcp.atlassian.com/v1/authorize`
-- **Token**: `https://cf.mcp.atlassian.com/v1/token`
-- **Dynamic Registration**: `https://cf.mcp.atlassian.com/v1/register` (RFC 7591)
-- **Grant types**: `authorization_code`, `refresh_token`
-- **Public clients**: Supported (`"none"` auth method)
-- **PKCE**: S256
+| Tool | Default | Expand |
+|------|---------|--------|
+| `gh issue view` | Curated text summary | `--json field,...`, `--comments` |
+| `kubectl get` | Table | `-o json`, `-o jsonpath=...` |
+| `glab issue view` | Curated text | `--json`, `--comments` |
+| **arvo (proposed)** | Curated text | `--fields`, `--comments`, `--description`, `--body`, `--full`, `--json [fields]`, `--raw` |
 
-### First-run auth sequence
+## Output Modes
 
-1. POST to registration endpoint with client metadata -> get `client_id` (cache it)
-2. Generate PKCE code_verifier + code_challenge (S256)
-3. Open browser to authorization endpoint
-4. Listen on localhost callback for auth code
-5. Exchange code at token endpoint -> `access_token` + `refresh_token`
-6. Cache tokens at `~/.config/arvo/tokens.json` (0600)
-
-### Subsequent runs
-
-1. Load cached tokens
-2. If access token expired, use refresh token silently
-3. If refresh token expired, print "run `arvo auth login`" and exit 1
-
-## MCP Protocol
-
-Transport: Streamable HTTP (POST JSON-RPC to `https://mcp.atlassian.com/v1/mcp`)
-
-Each CLI invocation:
-1. POST `initialize` request (with session reuse if cached session ID)
-2. POST `tools/call` with tool name + params
-3. Parse response, output as structured text (or JSON with `--json`)
-4. Clean up session
-
-## CLI Surface
+### `arvo jira get EA-123` (default)
 
 ```
-arvo auth login              # OAuth flow, cache tokens
-arvo auth status             # Show auth state
-arvo auth logout             # Clear cached tokens
+EA-123  Story  In Progress  High
+"Implement dark mode toggle"
+Assignee:    ben.cedar
+Sprint:      Sprint 24
+Labels:      frontend, ui
+Parent:      EA-100
+Links:       blocks EA-130 · blocked by EA-99
 
-arvo call <tool> [json]      # Raw MCP tool call (escape hatch)
-arvo tools                   # List available MCP tools
+Description (500 chars):
+  As a user I want to toggle dark mode so that I can use the app
+  comfortably at night...
 
-arvo jira get <key>          # Get issue
-arvo jira search <jql>       # Search issues
-arvo jira create             # Create issue (flags: --project, --type, --summary, --description)
-arvo jira transition <key>   # Transition issue
-arvo jira comment <key>      # Add comment
-
-arvo confluence get <id>     # Get page
-arvo confluence search <cql> # Search pages
+Comments: 3 (latest: 2026-04-28 by jane.doe)
 ```
 
-### Output modes
+~300 bytes. Agent decides: do I need more? It asks.
 
-- Default: human/agent-readable text (summaries, tables)
-- `--json`: raw JSON from MCP response
-- Errors to stderr, data to stdout
-
-## Language & Dependencies
-
-- **Go** (single binary, no runtime)
-- `golang.org/x/oauth2` or raw HTTP (the flow is simple enough)
-- No MCP SDK needed - it's just JSON-RPC over HTTP POST
-
-## File Structure
+### `arvo jira search "project = EA AND status = 'In Progress'"` (default)
 
 ```
-arvo/
-  cmd/
-    root.go          # cobra root command
-    auth.go          # auth login/status/logout
-    call.go          # raw tool call
-    tools.go         # list tools
-    jira.go          # jira subcommands
-    confluence.go    # confluence subcommands
-  internal/
-    auth/
-      oauth.go       # OAuth flow (register, authorize, token, refresh)
-      store.go       # Token/client storage (~/.config/arvo/)
-    mcp/
-      client.go      # MCP client (initialize, call tool, parse response)
-      jsonrpc.go     # JSON-RPC types
-    output/
-      format.go      # Text/JSON output formatting
-  main.go
-  go.mod
-  go.sum
+KEY      TYPE   STATUS       PRI   ASSIGNEE    SUMMARY
+EA-123   Story  In Progress  High  ben.cedar   Implement dark mode toggle
+EA-124   Bug    In Progress  Med   jane.doe    Login timeout on Safari
+2 issues
 ```
 
-## Config
+### `arvo confluence get <id>` (default)
 
-`~/.config/arvo/config.json` (optional):
-```json
-{
-  "mcp_url": "https://mcp.atlassian.com/v1/mcp",
-  "default_output": "text"
+```
+"Engineering Runbook"  (Page 12345)
+Space: EA  Status: current  Version: 14
+Last modified: 2026-04-20 by ben.cedar
+
+Body (1000 chars):
+  ## On-call process
+  When an alert fires...
+
+Comments: 2
+```
+
+## Flags
+
+All subcommands that return content support:
+
+| Flag | Effect |
+|------|--------|
+| `--fields key,status,assignee` | Print only named fields (comma-separated) |
+| `--comments` | Append last 10 comments (author + date + body, no metadata) |
+| `--comments-limit N` | Change comment limit (default 10) |
+| `--description` | Full untruncated description |
+| `--body` | Full untruncated page body (confluence) |
+| `--full` | All of the above combined |
+| `--json` | Curated summary as JSON |
+| `--json key,status,description` | Named fields as JSON (like `gh --json`) |
+| `--raw` | Full MCP response, unmodified — for debugging |
+
+`--raw` replaces current `--json` behaviour. `--json` becomes the curated JSON
+summary. Agents that need raw can use `arvo call <tool> <args>` instead.
+
+## Implementation
+
+### New package: `internal/format`
+
+Typed Go structs per entity. The full MCP response is parsed into these — raw
+JSON never reaches stdout unless `--raw`.
+
+```go
+// IssueSummary is the curated view of a Jira issue.
+type IssueSummary struct {
+    Key         string
+    IssueType   string
+    Status      string
+    Priority    string
+    Summary     string
+    Assignee    string
+    Sprint      string
+    StoryPoints float64
+    Labels      []string
+    Parent      string
+    Links       []IssueLink
+    DescSnip    string // first 500 chars of description
+    CommentCount int
+    LatestComment *CommentSnip
+}
+
+// IssueDetail extends IssueSummary with full fields for --full/--description/--comments.
+type IssueDetail struct {
+    IssueSummary
+    Description string
+    Comments    []Comment
+}
+
+type Comment struct {
+    Author string
+    Date   string
+    Body   string // plain text, no HTML/schema noise
+}
+
+type IssueLink struct {
+    Direction string // "blocks", "blocked by", "relates to"
+    Key       string
 }
 ```
 
-`~/.config/arvo/tokens.json` (managed by arvo):
-```json
-{
-  "client_id": "...",
-  "access_token": "...",
-  "refresh_token": "...",
-  "expires_at": "..."
-}
+Similar structs for `PageSummary`, `PageDetail`, `SearchResult`.
+
+### Extraction
+
+Each command handler calls a `format.ParseIssue(raw json.RawMessage) (*IssueSummary, error)`
+function that extracts the curated fields from the MCP response JSON. No struct
+field survives extraction unless it was explicitly mapped.
+
+### `--fields` implementation
+
+Parse comma-separated field names. Use reflection or a field map to print only
+those keys. Start simple: just filter the output lines, not the extraction.
+
+### `--json [fields]` implementation
+
+If `--json` has no argument: marshal the curated struct. If it has a field list:
+marshal only those keys (map[string]any subset).
+
+### Breaking change: `--json` → `--raw`
+
+Current `--json` emits full MCP JSON. This becomes `--raw`. `--json` will now
+emit the curated summary as JSON. This is a breaking change for any scripts
+using `--json` today.
+
+Migration: if any agent skills reference `arvo --json`, update them to `arvo --raw`.
+
+## Truncation Defaults
+
+| Field | Default limit | Flag to expand |
+|-------|--------------|----------------|
+| Description | 500 chars | `--description` |
+| Confluence body | 1000 chars | `--body` |
+| Comments shown | 10 most recent | `--comments-limit N` |
+| Comment body | 300 chars each | `--full` |
+| Search results | 50 rows (MCP default) | `--limit N` already on search |
+
+## Files Changed
+
+```
+cmd/jira.go        — add flags, call format.ParseIssue / format.PrintIssue
+cmd/confluence.go  — add flags, call format.ParsePage / format.PrintPage
+internal/
+  format/
+    issue.go       — IssueSummary, IssueDetail, ParseIssue, PrintIssue
+    page.go        — PageSummary, PageDetail, ParsePage, PrintPage
+    search.go      — SearchResult, ParseSearch, PrintSearch
+    fields.go      — --fields flag parsing and filtering
 ```
 
-## Skill Integration
+`internal/output/format.go` remains for generic KV/Table/Print helpers used
+elsewhere. The new `internal/format/` package is Jira/Confluence-specific.
 
-Once built, create a Claude Code / OpenCode skill that references `arvo`:
+## Out of Scope
 
-```markdown
-# Skill: atlassian
-
-Use `arvo` to interact with Jira and Confluence.
-
-## Commands
-- `arvo jira search "project = FOO AND status = Open"` - search issues
-- `arvo jira get FOO-123` - get issue details
-- `arvo confluence search "title ~ 'meeting'"` - search pages
-...
-```
-
-## Risks & Mitigations
-
-| Risk | Mitigation |
-|------|-----------|
-| Dynamic registration blocked by Atlassian | Fall back to manual client ID config |
-| Token refresh fails silently | Clear error message: "run `arvo auth login`" |
-| MCP protocol version changes | Pin `MCP-Protocol-Version` header, handle gracefully |
-| Session management overhead per invocation | Cache session ID, reuse across calls within TTL |
-
-## License
-
-MIT
+- `arvo call` — raw escape hatch, always full output
+- `arvo tools` — already compact
+- `arvo auth *` — no payload to truncate
