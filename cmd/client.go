@@ -10,8 +10,9 @@ import (
 
 // mcpSession holds a ready MCP client and the resolved cloudId.
 type mcpSession struct {
-	client  *mcp.Client
-	cloudID string
+	client   *mcp.Client
+	cloudID  string
+	cloudURL string // e.g. https://example.atlassian.net
 }
 
 // session loads cached tokens, refreshes if needed, resolves cloudId, and
@@ -34,30 +35,31 @@ func session() (*mcpSession, error) {
 		}
 	}
 
-	cloudID, err := resolveCloudID()
+	cloudID, cloudURL, err := resolveCloud()
 	if err != nil {
 		return nil, err
 	}
 
 	return &mcpSession{
-		client:  mcp.New(t.AccessToken),
-		cloudID: cloudID,
+		client:   mcp.New(t.AccessToken),
+		cloudID:  cloudID,
+		cloudURL: cloudURL,
 	}, nil
 }
 
-// resolveCloudID returns the cloudId to use, in priority order:
-//  1. --cloud flag
-//  2. config.json cloud_id
-func resolveCloudID() (string, error) {
+// resolveCloud returns the cloudId and cloudURL to use.
+// Note: when --cloud is specified, cloudURL is empty and issue browse URLs
+// will not be rendered. Use `arvo auth login` to persist cloudURL automatically.
+func resolveCloud() (string, string, error) {
 	if cloudFlag != "" {
-		return cloudFlag, nil
+		return cloudFlag, "", nil
 	}
 	cfg, err := config.Load()
 	if err != nil {
-		return "", fmt.Errorf("load config: %w", err)
+		return "", "", fmt.Errorf("load config: %w", err)
 	}
 	if cfg.CloudID == "" {
-		return "", fmt.Errorf("no cloud ID configured — run `arvo auth login` or pass --cloud <id>")
+		return "", "", fmt.Errorf("no cloud ID configured — run `arvo auth login` or pass --cloud <id>")
 	}
-	return cfg.CloudID, nil
+	return cfg.CloudID, cfg.CloudURL, nil
 }
