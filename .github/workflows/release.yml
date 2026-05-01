@@ -53,7 +53,18 @@ jobs:
 
       - name: Build release binaries
         if: steps.check.outputs.skip == 'false'
-        run: mise run release
+        env:
+          ARVO_VERSION: ${{ steps.version.outputs.next }}
+        run: |
+          VERSION="${ARVO_VERSION#v}"
+          LDFLAGS="-s -w -X main.version=${VERSION}"
+          mkdir -p dist
+          GOOS=linux   GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "${LDFLAGS}" -o dist/arvo-linux-amd64 .
+          GOOS=linux   GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "${LDFLAGS}" -o dist/arvo-linux-arm64 .
+          GOOS=darwin  GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "${LDFLAGS}" -o dist/arvo-darwin-amd64 .
+          GOOS=darwin  GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "${LDFLAGS}" -o dist/arvo-darwin-arm64 .
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "${LDFLAGS}" -o dist/arvo-windows-amd64.exe .
+          cd dist && sha256sum * > checksums.txt
 
       - name: Create GitHub release
         if: steps.check.outputs.skip == 'false'
