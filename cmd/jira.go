@@ -1,13 +1,19 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 
+	"github.com/Deastrom/arvo/internal/format"
 	"github.com/Deastrom/arvo/internal/mcp"
-	"github.com/Deastrom/arvo/internal/output"
 	"github.com/spf13/cobra"
+)
+
+// Per-command output flags.
+var (
+	jiraRaw  bool
+	jiraJSON bool
+	jiraFull bool
 )
 
 var jiraCmd = &cobra.Command{
@@ -31,7 +37,7 @@ var jiraGetCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return printToolResult(result)
+		return printIssue(result, s.cloudURL)
 	},
 }
 
@@ -51,7 +57,7 @@ var jiraSearchCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return printToolResult(result)
+		return printIssueSearch(result)
 	},
 }
 
@@ -86,7 +92,7 @@ var jiraCreateCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return printToolResult(result)
+		return printIssue(result, s.cloudURL)
 	},
 }
 
@@ -138,35 +144,101 @@ var jiraCommentCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		wantRaw() // trigger deprecation warning if global --json used
 		return printToolResult(result)
 	},
 }
 
-func printToolResult(result *mcp.ToolCallResult) error {
+// --- output routing ---
+
+// wantRaw reports whether the caller wants the full raw MCP response.
+// The legacy global --json flag is treated as --raw with a deprecation warning.
+func wantRaw() bool {
 	if jsonOutput {
-		return output.Print(os.Stdout, result, true)
+		fmt.Fprintln(os.Stderr, "warning: global --json is deprecated; use --raw for raw output or --json on the subcommand for curated JSON")
+		return true
+	}
+	return jiraRaw
+}
+
+// wantJSON reports whether the caller wants curated JSON output.
+func wantJSON() bool { return jiraJSON }
+
+func printIssue(result *mcp.ToolCallResult, cloudURL string) error {
+	if wantRaw() {
+		return printToolResult(result)
 	}
 	text := mcp.TextContent(result)
-	if text != "" {
-		fmt.Fprintln(os.Stdout, text)
+	if text == "" {
+		return printToolResult(result)
+	}
+	if jiraFull {
+		d, err := format.ParseIssueDetail(text)
+		if err != nil {
+			return printToolResult(result)
+		}
+		d.URL = format.IssueURL(cloudURL, d.Key)
+		if wantJSON() {
+			return printJSON(d)
+		}
+		format.PrintIssueDetail(os.Stdout, d)
 		return nil
 	}
-	b, err := json.MarshalIndent(result.Content, "", "  ")
+	s, err := format.ParseIssue(text)
 	if err != nil {
-		return err
+		return printToolResult(result)
 	}
-	fmt.Fprintln(os.Stdout, string(b))
+	s.URL = format.IssueURL(cloudURL, s.Key)
+	if wantJSON() {
+		return printJSON(s)
+	}
+	format.PrintIssueSummary(os.Stdout, s)
+	return nil
+}
+
+func printIssueSearch(result *mcp.ToolCallResult) error {
+	if wantRaw() {
+		return printToolResult(result)
+	}
+	text := mcp.TextContent(result)
+	if text == "" {
+		return printToolResult(result)
+	}
+	// --full on search: return individual full-detail summaries is not practical
+	// for search results (N API calls). Instead, --full includes the full summary
+	// text rows (no-op currently; reserved for future per-issue expansion).
+	r, err := format.ParseIssueSearch(text)
+	if err != nil {
+		return printToolResult(result)
+	}
+	if wantJSON() {
+		return printJSON(r)
+	}
+	format.PrintIssueSearch(os.Stdout, r)
 	return nil
 }
 
 func init() {
+	// get and search share all three output flags.
+	for _, c := range []*cobra.Command{jiraGetCmd, jiraSearchCmd} {
+		c.Flags().BoolVar(&jiraRaw, "raw", false, "Print raw MCP response")
+		c.Flags().BoolVar(&jiraJSON, "json", false, "Print curated JSON")
+		c.Flags().BoolVar(&jiraFull, "full", false, "Include full description and comments")
+	}
+
+	// create: --full makes no sense on a create response; omit it.
+	jiraCreateCmd.Flags().BoolVar(&jiraRaw, "raw", false, "Print raw MCP response")
+	jiraCreateCmd.Flags().BoolVar(&jiraJSON, "json", false, "Print curated JSON")
 	jiraCreateCmd.Flags().StringVar(&jiraProject, "project", "", "Project key (required)")
 	jiraCreateCmd.Flags().StringVar(&jiraIssueType, "type", "Task", "Issue type")
 	jiraCreateCmd.Flags().StringVar(&jiraSummary, "summary", "", "Issue summary (required)")
 	jiraCreateCmd.Flags().StringVar(&jiraDescription, "description", "", "Issue description")
 
+	// transition and comment: add --raw for escape hatch.
+	jiraTransitionCmd.Flags().BoolVar(&jiraRaw, "raw", false, "Print raw MCP response")
 	jiraTransitionCmd.Flags().StringVar(&jiraTransitionTo, "to", "", "Transition ID (required)")
 
+	jiraCommentCmd.Flags().BoolVar(&jiraRaw, "raw", false, "Print raw MCP response")
 	jiraCommentCmd.Flags().StringVar(&jiraCommentBody, "body", "", "Comment body (required)")
 
 	jiraCmd.AddCommand(jiraGetCmd, jiraSearchCmd, jiraCreateCmd, jiraTransitionCmd, jiraCommentCmd)

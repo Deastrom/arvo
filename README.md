@@ -47,24 +47,41 @@ arvo auth status    # Verify credentials
 
 ```bash
 # Jira
-arvo jira get EA-123
+arvo jira get EA-123                    # curated summary (default)
+arvo jira get EA-123 --full             # full description + all comments
+arvo jira get EA-123 --json             # curated JSON
+arvo jira get EA-123 --raw              # raw MCP response
 arvo jira search "project = EA AND status = 'In Progress' ORDER BY updated DESC"
 arvo jira create --project EA --type Task --summary "Fix the thing" --description "..."
 arvo jira comment EA-123 --body "Investigated — root cause is X"
 arvo jira transition EA-123 --to <transition-id>
 
 # Confluence
-arvo confluence get <page-id>
+arvo confluence get <page-id>           # curated summary
+arvo confluence get <page-id> --full    # full body + comments
+arvo confluence get <page-id> --json    # curated JSON
 arvo confluence search "space = ENG AND title ~ 'runbook'"
 
 # Raw MCP escape hatch
 arvo tools                              # list all available MCP tools
 arvo call <tool-name> '{"key":"val"}'   # call any tool directly
 
-# Flags
-arvo --json jira get EA-123             # output raw JSON
+# Global flags
 arvo --cloud <cloud-id> jira get EA-123 # override default site
 ```
+
+### Output modes
+
+| Flag | Behaviour |
+|------|-----------|
+| _(none)_ | Curated human-readable summary — slim by default for agent use |
+| `--full` | Expand full description and all comments |
+| `--json` | Curated JSON of the parsed summary struct |
+| `--raw` | Full raw MCP response (pass-through) |
+
+`--full`, `--json`, and `--raw` are per-subcommand flags on `jira get`, `jira search`, `jira create`, `confluence get`, and `confluence search`.
+
+> **Note:** The legacy global `--json` flag is deprecated. It now behaves as `--raw` with a warning. Use the subcommand-level `--json` or `--raw` instead.
 
 ## Agent skill
 
@@ -76,14 +93,21 @@ Once installed, add this to your agent's skill config:
 Use `arvo` to interact with Jira and Confluence.
 
 ## Commands
-- `arvo jira get EA-123` — get issue details
+- `arvo jira get EA-123` — curated issue summary
+- `arvo jira get EA-123 --full` — full description and all comments
+- `arvo jira get EA-123 --json` — curated JSON (good for parsing)
 - `arvo jira search "project = EA AND assignee = currentUser()"` — search with JQL
 - `arvo jira create --project EA --type Task --summary "..."` — create issue
 - `arvo jira comment EA-123 --body "..."` — add comment
-- `arvo confluence get <page-id>` — get page content
-- `arvo confluence search "title ~ 'meeting'"` — search pages
-- `arvo --json <cmd>` — get raw JSON output
-- `arvo call <tool> '{}'` — call any MCP tool directly
+- `arvo confluence get <page-id>` — curated page summary
+- `arvo confluence get <page-id> --full` — full page body and comments
+- `arvo confluence search "title ~ 'meeting'"` — search pages with CQL
+- `arvo call <tool> '{}'` — call any MCP tool directly (escape hatch)
+
+## Output flags (per subcommand)
+- `--json` — curated JSON of the parsed summary
+- `--full` — expand full description/body and all comments
+- `--raw` — raw MCP response
 ````
 
 ## Development
