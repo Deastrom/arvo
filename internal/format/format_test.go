@@ -690,3 +690,77 @@ func isValidUTF8(s string) bool {
 	return true
 }
 
+// ---- ParseTransitions / PrintTransitions ------------------------------------
+
+func TestParseTransitions_Basic(t *testing.T) {
+	text := mustJSON(map[string]any{
+		"transitions": []any{
+			map[string]any{"id": "1", "name": "Open"},
+			map[string]any{"id": "2", "name": "In Progress"},
+		},
+	})
+	ts, err := format.ParseTransitions(text)
+	if err != nil {
+		t.Fatalf("ParseTransitions error: %v", err)
+	}
+	if len(ts) != 2 {
+		t.Fatalf("expected 2 transitions, got %d", len(ts))
+	}
+	if ts[0].ID != "1" || ts[0].Name != "Open" {
+		t.Errorf("ts[0]: got %+v", ts[0])
+	}
+	if ts[1].ID != "2" || ts[1].Name != "In Progress" {
+		t.Errorf("ts[1]: got %+v", ts[1])
+	}
+}
+
+func TestParseTransitions_MissingArray(t *testing.T) {
+	_, err := format.ParseTransitions(mustJSON(map[string]any{}))
+	if err == nil {
+		t.Error("expected error for missing transitions array")
+	}
+}
+
+func TestParseTransitions_InvalidJSON(t *testing.T) {
+	_, err := format.ParseTransitions("not json")
+	if err == nil {
+		t.Error("expected error for invalid JSON")
+	}
+}
+
+func TestParseTransitions_SkipsMalformedEntries(t *testing.T) {
+	// Numeric id (not a string) results in empty strVal — should be skipped.
+	text := mustJSON(map[string]any{
+		"transitions": []any{
+			map[string]any{"id": "1", "name": "Valid"},
+			map[string]any{"id": 999, "name": "Numeric ID — skip me"},
+			"not a map",
+		},
+	})
+	ts, err := format.ParseTransitions(text)
+	if err != nil {
+		t.Fatalf("ParseTransitions error: %v", err)
+	}
+	if len(ts) != 1 {
+		t.Errorf("expected 1 valid transition, got %d: %+v", len(ts), ts)
+	}
+	if ts[0].ID != "1" {
+		t.Errorf("unexpected transition: %+v", ts[0])
+	}
+}
+
+func TestPrintTransitions_Table(t *testing.T) {
+	ts := []format.Transition{
+		{ID: "911", Name: "Done"},
+		{ID: "941", Name: "In Progress"},
+	}
+	var buf bytes.Buffer
+	format.PrintTransitions(&buf, ts)
+	out := buf.String()
+	for _, want := range []string{"ID", "NAME", "911", "Done", "941", "In Progress"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("table missing %q:\n%s", want, out)
+		}
+	}
+}
+

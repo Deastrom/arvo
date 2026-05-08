@@ -96,7 +96,45 @@ var jiraCreateCmd = &cobra.Command{
 	},
 }
 
-var jiraTransitionTo string
+var (
+	jiraTransitionTo         string
+	jiraTransitionResolution string
+)
+
+var jiraTransitionsCmd = &cobra.Command{
+	Use:   "transitions <key>",
+	Short: "List valid transitions for a Jira issue",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		s, err := session()
+		if err != nil {
+			return err
+		}
+		result, err := s.client.CallTool("getTransitionsForJiraIssue", map[string]any{
+			"cloudId":      s.cloudID,
+			"issueIdOrKey": args[0],
+		})
+		if err != nil {
+			return err
+		}
+		if wantRaw() {
+			return printToolResult(result)
+		}
+		text := mcp.TextContent(result)
+		if text == "" {
+			return printToolResult(result)
+		}
+		transitions, err := format.ParseTransitions(text)
+		if err != nil {
+			return printToolResult(result)
+		}
+		if wantJSON() {
+			return printJSON(transitions)
+		}
+		format.PrintTransitions(os.Stdout, transitions)
+		return nil
+	},
+}
 
 var jiraTransitionCmd = &cobra.Command{
 	Use:   "transition <key>",
@@ -110,11 +148,17 @@ var jiraTransitionCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		result, err := s.client.CallTool("transitionJiraIssue", map[string]any{
+		toolArgs := map[string]any{
 			"cloudId":      s.cloudID,
 			"issueIdOrKey": args[0],
 			"transition":   map[string]any{"id": jiraTransitionTo},
-		})
+		}
+		if jiraTransitionResolution != "" {
+			toolArgs["fields"] = map[string]any{
+				"resolution": map[string]any{"name": jiraTransitionResolution},
+			}
+		}
+		result, err := s.client.CallTool("transitionJiraIssue", toolArgs)
 		if err != nil {
 			return err
 		}
@@ -234,13 +278,18 @@ func init() {
 	jiraCreateCmd.Flags().StringVar(&jiraSummary, "summary", "", "Issue summary (required)")
 	jiraCreateCmd.Flags().StringVar(&jiraDescription, "description", "", "Issue description")
 
+	// transitions: list valid transitions for an issue.
+	jiraTransitionsCmd.Flags().BoolVar(&jiraRaw, "raw", false, "Print raw MCP response")
+	jiraTransitionsCmd.Flags().BoolVar(&jiraJSON, "json", false, "Print curated JSON")
+
 	// transition and comment: add --raw for escape hatch.
 	jiraTransitionCmd.Flags().BoolVar(&jiraRaw, "raw", false, "Print raw MCP response")
 	jiraTransitionCmd.Flags().StringVar(&jiraTransitionTo, "to", "", "Transition ID (required)")
+	jiraTransitionCmd.Flags().StringVar(&jiraTransitionResolution, "resolution", "", "Resolution name to set (e.g. Done, Fixed, Won't Fix)")
 
 	jiraCommentCmd.Flags().BoolVar(&jiraRaw, "raw", false, "Print raw MCP response")
 	jiraCommentCmd.Flags().StringVar(&jiraCommentBody, "body", "", "Comment body (required)")
 
-	jiraCmd.AddCommand(jiraGetCmd, jiraSearchCmd, jiraCreateCmd, jiraTransitionCmd, jiraCommentCmd)
+	jiraCmd.AddCommand(jiraGetCmd, jiraSearchCmd, jiraCreateCmd, jiraTransitionsCmd, jiraTransitionCmd, jiraCommentCmd)
 	rootCmd.AddCommand(jiraCmd)
 }
