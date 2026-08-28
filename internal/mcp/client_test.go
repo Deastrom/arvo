@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Deastrom/arvo/internal/mcp"
@@ -257,6 +258,76 @@ func TestSSEMalformedJSON(t *testing.T) {
 	_, err := client.CallTool("anyTool", map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for malformed JSON in SSE data")
+	}
+}
+
+func TestBotChallengeBlocked(t *testing.T) {
+	htmlBody := "<!DOCTYPE html><html><head><title>Human Verification</title></head><body>" +
+		strings.Repeat("A", 20000) + "</body></html>"
+
+	_, client := makeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Header().Set("X-Amzn-Waf-Action", "captcha")
+		w.Header().Set("X-Amz-Cf-Id", "test-cf-id-123")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		w.Write([]byte(htmlBody))
+	})
+
+	_, err := client.Initialize()
+	if err == nil {
+		t.Fatal("expected error on WAF-challenged response")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "<!DOCTYPE") || strings.Contains(msg, "Human Verification") {
+		t.Errorf("error message leaked raw challenge HTML: %q", msg)
+	}
+	if !strings.Contains(msg, "bot protection") {
+		t.Errorf("error message missing bot-protection guidance: %q", msg)
+	}
+	if !strings.Contains(msg, "test-cf-id-123") {
+		t.Errorf("error message missing cf-id for support escalation: %q", msg)
+	}
+	if len(msg) > 300 {
+		t.Errorf("error message unexpectedly long (%d bytes): %q", len(msg), msg)
+	}
+}
+
+// isBotChallenge also fires on x-amzn-waf-action alone (any status code),
+// covering the "challenge" action which can accompany other statuses.
+func TestBotChallengeDetectedViaHeaderAlone(t *testing.T) {
+	_, client := makeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Amzn-Waf-Action", "challenge")
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte("short body, no html"))
+	})
+
+	_, err := client.Initialize()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "bot protection") {
+		t.Errorf("expected bot-protection message, got: %q", err.Error())
+	}
+}
+
+func TestErrorBodyTruncated(t *testing.T) {
+	longBody := strings.Repeat("x", 5000)
+
+	_, client := makeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(longBody))
+	})
+
+	_, err := client.Initialize()
+	if err == nil {
+		t.Fatal("expected error on 500")
+	}
+	msg := err.Error()
+	if len(msg) > 600 {
+		t.Errorf("error message not bounded, got %d bytes", len(msg))
+	}
+	if !strings.HasSuffix(msg, "…") {
+		t.Errorf("expected truncated body to end with ellipsis, got: %q", msg[len(msg)-20:])
 	}
 }
 
