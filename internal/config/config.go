@@ -11,9 +11,9 @@ const configFile = "config.json"
 
 // Config holds arvo user configuration.
 type Config struct {
-	CloudID    string `json:"cloud_id,omitempty"`
-	CloudURL   string `json:"cloud_url,omitempty"`
-	MCPURL     string `json:"mcp_url,omitempty"`
+	CloudID  string `json:"cloud_id,omitempty"`
+	CloudURL string `json:"cloud_url,omitempty"`
+	MCPURL   string `json:"mcp_url,omitempty"`
 }
 
 func dir() (string, error) {

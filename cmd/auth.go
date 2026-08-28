@@ -38,7 +38,11 @@ var authLoginCmd = &cobra.Command{
 
 		// Fetch accessible sites via the MCP tool (not the REST API — the MCP
 		// token is not valid for api.atlassian.com).
-		mcpClient := mcp.New(tokens.AccessToken)
+		mcpURL, err := resolveMCPURL()
+		if err != nil {
+			return err
+		}
+		mcpClient := mcp.New(tokens.AccessToken, mcpURL)
 		sites, err := fetchSitesViaMCP(mcpClient)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not fetch sites: %v\n", err)

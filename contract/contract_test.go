@@ -104,7 +104,7 @@ func TestContractInitializeHandshake(t *testing.T) {
 	srv := mcpServer(t, nil)
 	defer srv.Close()
 
-	c := mcp.NewWithURL("test-token", srv.URL)
+	c := mcp.New("test-token", srv.URL)
 	result, err := c.Initialize()
 	if err != nil {
 		t.Fatalf("Initialize: %v", err)
@@ -121,7 +121,7 @@ func TestContractInitializeIdempotent(t *testing.T) {
 	srv := mcpServer(t, nil)
 	defer srv.Close()
 
-	c := mcp.NewWithURL("test-token", srv.URL)
+	c := mcp.New("test-token", srv.URL)
 	if _, err := c.Initialize(); err != nil {
 		t.Fatalf("first Initialize: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestContractListToolsSessionRequired(t *testing.T) {
 	})
 	defer srv.Close()
 
-	c := mcp.NewWithURL("test-token", srv.URL)
+	c := mcp.New("test-token", srv.URL)
 	got, err := c.ListTools()
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
@@ -186,7 +186,7 @@ func TestContractCallToolArgumentsAlwaysSent(t *testing.T) {
 	})
 	defer srv.Close()
 
-	c := mcp.NewWithURL("test-token", srv.URL)
+	c := mcp.New("test-token", srv.URL)
 	// Call with empty args — arguments must still be present in payload.
 	if _, err := c.CallTool("anyTool", map[string]any{}); err != nil {
 		t.Fatalf("CallTool: %v", err)
@@ -210,7 +210,7 @@ func TestContractSSEResponse(t *testing.T) {
 	})
 	defer srv.Close()
 
-	c := mcp.NewWithURL("test-token", srv.URL)
+	c := mcp.New("test-token", srv.URL)
 	result, err := c.CallTool("anyTool", map[string]any{})
 	if err != nil {
 		t.Fatalf("CallTool SSE: %v", err)
@@ -232,7 +232,7 @@ func TestContractToolError(t *testing.T) {
 	})
 	defer srv.Close()
 
-	c := mcp.NewWithURL("test-token", srv.URL)
+	c := mcp.New("test-token", srv.URL)
 	_, err := c.CallTool("anyTool", map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for isError=true tool result")
@@ -245,7 +245,7 @@ func TestContractUnauthorized(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := mcp.NewWithURL("bad-token", srv.URL)
+	c := mcp.New("bad-token", srv.URL)
 	_, err := c.Initialize()
 	if err == nil {
 		t.Fatal("expected error on 401")

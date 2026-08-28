@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/Deastrom/arvo/internal/auth"
 	"github.com/Deastrom/arvo/internal/config"
@@ -40,8 +41,13 @@ func session() (*mcpSession, error) {
 		return nil, err
 	}
 
+	mcpURL, err := resolveMCPURL()
+	if err != nil {
+		return nil, err
+	}
+
 	return &mcpSession{
-		client:   mcp.New(t.AccessToken),
+		client:   mcp.New(t.AccessToken, mcpURL),
 		cloudID:  cloudID,
 		cloudURL: cloudURL,
 	}, nil
@@ -62,4 +68,23 @@ func resolveCloud() (string, string, error) {
 		return "", "", fmt.Errorf("no cloud ID configured — run `arvo auth login` or pass --cloud <id>")
 	}
 	return cfg.CloudID, cfg.CloudURL, nil
+}
+
+// resolveMCPURL returns the MCP server endpoint to use, checked in order:
+// the ARVO_MCP_URL env var, the persisted config's mcp_url, then the
+// built-in default (mcp.DefaultURL). The env var lets an override be
+// applied without a rebuild or config edit — useful when Atlassian
+// changes the endpoint or during an edge-side incident.
+func resolveMCPURL() (string, error) {
+	if v := os.Getenv("ARVO_MCP_URL"); v != "" {
+		return v, nil
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return "", fmt.Errorf("load config: %w", err)
+	}
+	if cfg.MCPURL != "" {
+		return cfg.MCPURL, nil
+	}
+	return mcp.DefaultURL, nil
 }
