@@ -14,7 +14,12 @@ import (
 )
 
 const (
-	mcpURL          = "https://mcp.atlassian.com/v1/mcp"
+	// DefaultURL is the Atlassian Rovo MCP Server endpoint used when no
+	// override is configured. Callers needing a different endpoint (e.g.
+	// via the ARVO_MCP_URL env var or config's mcp_url) pass it explicitly
+	// to New.
+	DefaultURL = "https://mcp.atlassian.com/v1/mcp"
+
 	protocolVersion = "2025-03-26"
 
 	// supportedProtocols lists the protocol versions this client understands.
@@ -40,17 +45,9 @@ type Client struct {
 	initialized bool   // true after initialize + notifications/initialized sent
 }
 
-// New creates a new MCP client with the given access token.
-func New(accessToken string) *Client {
-	return newClient(accessToken, mcpURL)
-}
-
-// NewWithURL creates a client with a custom base URL (for testing).
-func NewWithURL(accessToken, baseURL string) *Client {
-	return newClient(accessToken, baseURL)
-}
-
-func newClient(accessToken, baseURL string) *Client {
+// New creates an MCP client for the given access token and base URL.
+// Use DefaultURL for the standard Atlassian endpoint.
+func New(accessToken, baseURL string) *Client {
 	return &Client{
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,

@@ -14,7 +14,7 @@ func makeServer(t *testing.T, handler http.HandlerFunc) (*httptest.Server, *mcp.
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
-	client := mcp.NewWithURL("test-token", srv.URL)
+	client := mcp.New("test-token", srv.URL)
 	return srv, client
 }
 
