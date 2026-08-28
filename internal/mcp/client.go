@@ -128,6 +128,38 @@ func isRetryable(err error) bool {
 	}()
 }
 
+// maxErrorBodyBytes caps how much of an error response body is echoed back
+// to the user. Prevents dumping multi-KB HTML (e.g. WAF challenge pages)
+// into the terminal.
+const maxErrorBodyBytes = 512
+
+// readErrorBody reads up to maxErrorBodyBytes of resp.Body for use in an
+// error message, appending an ellipsis if the body was truncated.
+func readErrorBody(resp *http.Response) string {
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes+1))
+	if len(b) > maxErrorBodyBytes {
+		return string(b[:maxErrorBodyBytes]) + "…"
+	}
+	return string(b)
+}
+
+// isBotChallenge reports whether resp looks like an edge bot-protection
+// challenge (e.g. AWS WAF CAPTCHA/Challenge) rather than a real API error.
+// AWS WAF sets x-amzn-waf-action on blocked requests; when it can't render
+// its interstitial (non-GET requests can't show a browser challenge page)
+// it falls back to returning the challenge HTML with an unrelated status
+// like 405, which would otherwise look like a protocol error.
+func isBotChallenge(resp *http.Response) bool {
+	if resp.Header.Get("x-amzn-waf-action") != "" {
+		return true
+	}
+	if resp.StatusCode == http.StatusMethodNotAllowed &&
+		strings.Contains(resp.Header.Get("Content-Type"), "text/html") {
+		return true
+	}
+	return false
+}
+
 // doOnce performs a single HTTP round-trip and returns a *Response or error.
 // It returns *retryableSentinel for 429/503 so the caller can retry.
 func (c *Client) doOnce(body []byte, reqID any) (*Response, error) {
@@ -160,12 +192,25 @@ func (c *Client) doOnce(body []byte, reqID any) (*Response, error) {
 		// Valid response for notifications (no body).
 		return nil, nil
 	case http.StatusTooManyRequests, http.StatusServiceUnavailable:
-		b, _ := io.ReadAll(resp.Body)
-		return nil, &retryableSentinel{fmt.Errorf("mcp http %d: %s", resp.StatusCode, b)}
+		return nil, &retryableSentinel{fmt.Errorf("mcp http %d: %s", resp.StatusCode, readErrorBody(resp))}
+	}
+	if isBotChallenge(resp) {
+		// Not wrapped in retryableSentinel: the 2s/2-attempt backoff in do() is too
+		// short to matter against an edge bot challenge, and retrying just
+		// burns rate limit. Fail fast with a clear diagnosis instead of the
+		// raw challenge HTML.
+		cfID := resp.Header.Get("X-Amz-Cf-Id")
+		if cfID == "" {
+			cfID = "unknown"
+		}
+		return nil, fmt.Errorf(
+			"mcp request blocked by Atlassian edge bot protection (http %d, cf-id %s) — "+
+				"this is transient, not an auth failure; wait a few minutes and retry",
+			resp.StatusCode, cfID,
+		)
 	}
 	if resp.StatusCode >= 400 {
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("mcp http %d: %s", resp.StatusCode, b)
+		return nil, fmt.Errorf("mcp http %d: %s", resp.StatusCode, readErrorBody(resp))
 	}
 
 	// Route to SSE or JSON parser based on Content-Type.
